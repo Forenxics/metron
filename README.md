@@ -30,12 +30,30 @@ limitations under the License.
 > **📚 Documentation:**
 > - [Modernization Guide](MODERNIZATION_GUIDE.md) - Comprehensive upgrade strategy
 > - [Migration Guide](MIGRATION_GUIDE.md) - Step-by-step migration instructions
+> - [Docker Deployment](DOCKER_GUIDE.md) - Local development with Docker Compose
 > - [Kubernetes Deployment](metron-deployment/kubernetes/README.md) - Cloud-native deployment
 > - [Flink Integration](metron-platform/metron-flink/README.md) - Modern stream processing
+> - [AI/ML Integration](metron-analytics/metron-ai-ml/README.md) - Machine learning examples
 >
 > **🚀 Quick Start (Modern Metron):**
+>
+> **Option 1: Docker (Local Development)**
 > ```bash
-> # Deploy to Kubernetes
+> # Start entire stack locally (requires 16GB RAM)
+> make quick-start
+>
+> # Or use Docker Compose directly
+> docker-compose up -d
+>
+> # Access UIs at:
+> # - Alerts: http://localhost:4200
+> # - Kibana: http://localhost:5601
+> # - Superset: http://localhost:8088
+> ```
+>
+> **Option 2: Kubernetes (Production)**
+> ```bash
+> # Deploy to Kubernetes cluster
 > helm install metron ./metron-deployment/kubernetes/helm/metron-platform \
 >   --namespace metron --create-namespace
 > ```
