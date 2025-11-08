@@ -1,0 +1,548 @@
+version: '3.8'
+
+# Apache Metron 2.0 - Modern Cloud-Native Stack
+# This Docker Compose file provides a complete Metron environment for development and testing
+
+services:
+  #############################################################################
+  # KAFKA ECOSYSTEM
+  #############################################################################
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    hostname: zookeeper
+    container_name: metron-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 5
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    networks:
+      - metron-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: kafka
+    container_name: metron-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - metron-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    hostname: schema-registry
+    container_name: metron-schema-registry
+    depends_on:
+      - kafka
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:9092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    networks:
+      - metron-network
+
+  #############################################################################
+  # CASSANDRA (Storage)
+  #############################################################################
+
+  cassandra:
+    image: cassandra:4.1
+    hostname: cassandra
+    container_name: metron-cassandra
+    ports:
+      - "9042:9042"
+      - "7000:7000"
+    environment:
+      CASSANDRA_CLUSTER_NAME: metron-cluster
+      CASSANDRA_DC: dc1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_NUM_TOKENS: 256
+      MAX_HEAP_SIZE: 2G
+      HEAP_NEWSIZE: 400M
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+      - ./docker/cassandra/init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - metron-network
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  #############################################################################
+  # ELASTICSEARCH + KIBANA
+  #############################################################################
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    hostname: elasticsearch
+    container_name: metron-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - xpack.ml.enabled=true
+      - "ES_JAVA_OPTS=-Xms4g -Xmx4g"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - metron-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    hostname: kibana
+    container_name: metron-kibana
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      XPACK_SECURITY_ENABLED: 'false'
+      XPACK_ML_ENABLED: 'true'
+    networks:
+      - metron-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  #############################################################################
+  # NEO4J (Graph Database for Threat Intel)
+  #############################################################################
+
+  neo4j:
+    image: neo4j:5.15.0
+    hostname: neo4j
+    container_name: metron-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/metron123
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_dbms_memory_heap_initial__size: 2G
+      NEO4J_dbms_memory_heap_max__size: 4G
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    networks:
+      - metron-network
+
+  #############################################################################
+  # FLINK (Stream Processing)
+  #############################################################################
+
+  flink-jobmanager:
+    image: flink:1.18.0-java17
+    hostname: flink-jobmanager
+    container_name: metron-flink-jobmanager
+    depends_on:
+      - kafka
+    ports:
+      - "8082:8081"
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 2
+        state.backend: rocksdb
+        state.checkpoints.dir: file:///tmp/flink-checkpoints
+        state.backend.incremental: true
+        execution.checkpointing.interval: 60000
+    volumes:
+      - flink-checkpoints:/tmp/flink-checkpoints
+      - ./metron-platform/metron-flink/target:/opt/flink/usrlib
+    networks:
+      - metron-network
+
+  flink-taskmanager:
+    image: flink:1.18.0-java17
+    hostname: flink-taskmanager
+    container_name: metron-flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 4096m
+    volumes:
+      - ./metron-platform/metron-flink/target:/opt/flink/usrlib
+    networks:
+      - metron-network
+    deploy:
+      replicas: 2
+
+  #############################################################################
+  # METRON REST API
+  #############################################################################
+
+  metron-rest:
+    build:
+      context: ./docker/metron-rest
+      dockerfile: Dockerfile
+    hostname: metron-rest
+    container_name: metron-rest
+    depends_on:
+      - kafka
+      - elasticsearch
+      - cassandra
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      CASSANDRA_CONTACT_POINTS: cassandra
+      CASSANDRA_KEYSPACE: metron
+      JAVA_OPTS: "-Xmx2g -Xms2g"
+    volumes:
+      - ./metron-interface/metron-rest/target/metron-rest.jar:/app/metron-rest.jar
+    networks:
+      - metron-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  #############################################################################
+  # METRON UIs
+  #############################################################################
+
+  metron-alerts-ui:
+    build:
+      context: ./docker/metron-alerts-ui
+      dockerfile: Dockerfile
+    hostname: metron-alerts-ui
+    container_name: metron-alerts-ui
+    depends_on:
+      - metron-rest
+    ports:
+      - "4200:80"
+    environment:
+      METRON_REST_URL: http://metron-rest:8080
+    networks:
+      - metron-network
+
+  metron-config-ui:
+    build:
+      context: ./docker/metron-config-ui
+      dockerfile: Dockerfile
+    hostname: metron-config-ui
+    container_name: metron-config-ui
+    depends_on:
+      - metron-rest
+    ports:
+      - "4201:80"
+    environment:
+      METRON_REST_URL: http://metron-rest:8080
+    networks:
+      - metron-network
+
+  #############################################################################
+  # APACHE SUPERSET (BI Dashboards)
+  #############################################################################
+
+  superset-db:
+    image: postgres:15
+    hostname: superset-db
+    container_name: metron-superset-db
+    environment:
+      POSTGRES_DB: superset
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset123
+    volumes:
+      - superset-db-data:/var/lib/postgresql/data
+    networks:
+      - metron-network
+
+  superset-redis:
+    image: redis:7.2
+    hostname: superset-redis
+    container_name: metron-superset-redis
+    networks:
+      - metron-network
+
+  superset:
+    image: apache/superset:3.0.0
+    hostname: superset
+    container_name: metron-superset
+    depends_on:
+      - superset-db
+      - superset-redis
+    ports:
+      - "8088:8088"
+    environment:
+      SUPERSET_SECRET_KEY: 'metron-superset-secret-key-change-in-production'
+      DATABASE_DB: superset
+      DATABASE_HOST: superset-db
+      DATABASE_PASSWORD: superset123
+      DATABASE_USER: superset
+      REDIS_HOST: superset-redis
+      REDIS_PORT: 6379
+    volumes:
+      - superset-data:/app/superset_home
+      - ./docker/superset/superset_config.py:/app/superset_config.py
+    networks:
+      - metron-network
+    command: >
+      bash -c "superset db upgrade &&
+               superset fab create-admin --username admin --firstname Admin --lastname User --email admin@metron.local --password admin &&
+               superset init &&
+               /usr/bin/run-server.sh"
+
+  #############################################################################
+  # AIRFLOW (Workflow Orchestration)
+  #############################################################################
+
+  airflow-db:
+    image: postgres:15
+    hostname: airflow-db
+    container_name: metron-airflow-db
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow123
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    networks:
+      - metron-network
+
+  airflow-webserver:
+    image: apache/airflow:2.7.3
+    hostname: airflow-webserver
+    container_name: metron-airflow-webserver
+    depends_on:
+      - airflow-db
+    ports:
+      - "8089:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow123@airflow-db/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'metron-fernet-key-change-in-production-base64encoded'
+      AIRFLOW__WEBSERVER__SECRET_KEY: 'metron-secret-key'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    volumes:
+      - ./metron-orchestration/airflow/dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+    networks:
+      - metron-network
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.3
+    hostname: airflow-scheduler
+    container_name: metron-airflow-scheduler
+    depends_on:
+      - airflow-db
+      - airflow-webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow123@airflow-db/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'metron-fernet-key-change-in-production-base64encoded'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    volumes:
+      - ./metron-orchestration/airflow/dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+    networks:
+      - metron-network
+    command: scheduler
+
+  #############################################################################
+  # STREAMLIT (AI Apps)
+  #############################################################################
+
+  streamlit-threat-hunting:
+    build:
+      context: ./docker/streamlit-threat-hunting
+      dockerfile: Dockerfile
+    hostname: streamlit-threat-hunting
+    container_name: metron-streamlit-threat-hunting
+    depends_on:
+      - elasticsearch
+      - metron-rest
+    ports:
+      - "8501:8501"
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      METRON_REST_URL: http://metron-rest:8080
+    networks:
+      - metron-network
+
+  #############################################################################
+  # MLFLOW (ML Experiment Tracking)
+  #############################################################################
+
+  mlflow-db:
+    image: postgres:15
+    hostname: mlflow-db
+    container_name: metron-mlflow-db
+    environment:
+      POSTGRES_DB: mlflow
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow123
+    volumes:
+      - mlflow-db-data:/var/lib/postgresql/data
+    networks:
+      - metron-network
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.8.0
+    hostname: mlflow
+    container_name: metron-mlflow
+    depends_on:
+      - mlflow-db
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql://mlflow:mlflow123@mlflow-db/mlflow
+      MLFLOW_ARTIFACT_ROOT: /mlflow/artifacts
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    networks:
+      - metron-network
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://mlflow:mlflow123@mlflow-db/mlflow
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+
+  #############################################################################
+  # PROMETHEUS + GRAFANA (Monitoring)
+  #############################################################################
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    hostname: prometheus
+    container_name: metron-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - metron-network
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    hostname: grafana
+    container_name: metron-grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - metron-network
+
+  #############################################################################
+  # JUPYTER (Data Science Notebooks)
+  #############################################################################
+
+  jupyter:
+    image: jupyter/scipy-notebook:latest
+    hostname: jupyter
+    container_name: metron-jupyter
+    depends_on:
+      - elasticsearch
+      - cassandra
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_ENABLE_LAB: 'yes'
+      GRANT_SUDO: 'yes'
+    volumes:
+      - ./metron-analytics/notebooks:/home/jovyan/work
+      - jupyter-data:/home/jovyan/.local
+    networks:
+      - metron-network
+    command: start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  cassandra-data:
+  elasticsearch-data:
+  neo4j-data:
+  neo4j-logs:
+  flink-checkpoints:
+  superset-db-data:
+  superset-data:
+  airflow-db-data:
+  airflow-logs:
+  mlflow-db-data:
+  mlflow-artifacts:
+  prometheus-data:
+  grafana-data:
+  jupyter-data:
+
+networks:
+  metron-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

@@ -1,0 +1,59 @@
+# Prometheus configuration for Metron monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'metron'
+    environment: 'docker'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Flink Job Manager
+  - job_name: 'flink-jobmanager'
+    static_configs:
+      - targets: ['flink-jobmanager:8081']
+    metrics_path: '/metrics'
+
+  # Kafka (via JMX Exporter)
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9092']
+
+  # Cassandra (via JMX Exporter)
+  - job_name: 'cassandra'
+    static_configs:
+      - targets: ['cassandra:7070']
+
+  # Elasticsearch
+  - job_name: 'elasticsearch'
+    static_configs:
+      - targets: ['elasticsearch:9200']
+    metrics_path: '/_prometheus/metrics'
+
+  # Metron REST API
+  - job_name: 'metron-rest'
+    static_configs:
+      - targets: ['metron-rest:8080']
+    metrics_path: '/actuator/prometheus'
+
+  # Node Exporter (if deployed)
+  - job_name: 'node'
+    static_configs:
+      - targets: []
+        # - targets: ['node-exporter:9100']
