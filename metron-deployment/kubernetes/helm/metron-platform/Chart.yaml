@@ -1,0 +1,68 @@
+apiVersion: v2
+name: metron-platform
+description: Modern Apache Metron - Cloud-Native Cybersecurity Analytics Platform
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+
+keywords:
+  - security
+  - cybersecurity
+  - threat-detection
+  - siem
+  - analytics
+  - machine-learning
+  - streaming
+
+home: https://github.com/apache/metron
+sources:
+  - https://github.com/apache/metron
+
+maintainers:
+  - name: Apache Metron Modernization Team
+    email: dev@metron.apache.org
+
+dependencies:
+  # Kafka (Strimzi Operator)
+  - name: strimzi-kafka-operator
+    version: "0.38.0"
+    repository: https://strimzi.io/charts/
+    condition: kafka.enabled
+
+  # Flink (Flink Kubernetes Operator)
+  - name: flink-kubernetes-operator
+    version: "1.7.0"
+    repository: https://downloads.apache.org/flink/flink-kubernetes-operator-1.7.0/
+    condition: flink.enabled
+
+  # Cassandra (K8ssandra)
+  - name: k8ssandra-operator
+    version: "1.14.0"
+    repository: https://helm.k8ssandra.io/stable
+    condition: cassandra.enabled
+
+  # Elasticsearch (ECK)
+  - name: eck-operator
+    version: "2.10.0"
+    repository: https://helm.elastic.co
+    condition: elasticsearch.enabled
+
+  # Apache Superset
+  - name: superset
+    version: "0.12.0"
+    repository: https://apache.github.io/superset
+    condition: superset.enabled
+
+  # Apache Airflow
+  - name: airflow
+    version: "1.11.0"
+    repository: https://airflow.apache.org
+    condition: airflow.enabled
+
+  # Prometheus (Monitoring)
+  - name: kube-prometheus-stack
+    version: "54.0.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: monitoring.enabled
+
+icon: https://metron.apache.org/images/metron-logo.png

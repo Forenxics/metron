@@ -1,0 +1,660 @@
+# Default values for metron-platform
+# This is a YAML-formatted file.
+
+global:
+  # Docker registry for Metron images
+  imageRegistry: docker.io
+  imagePullSecrets: []
+  storageClass: ""
+
+# Namespace configuration
+namespace:
+  name: metron
+  create: true
+
+#############################################################################
+# KAFKA CONFIGURATION (Message Streaming)
+#############################################################################
+kafka:
+  enabled: true
+  version: "3.6.0"
+
+  cluster:
+    name: metron-kafka
+    replicas: 3
+
+    storage:
+      type: persistent-claim
+      size: 100Gi
+      class: ""
+
+    config:
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+      inter.broker.protocol.version: "3.6"
+
+    resources:
+      requests:
+        memory: 4Gi
+        cpu: 2000m
+      limits:
+        memory: 8Gi
+        cpu: 4000m
+
+  # ZooKeeper (legacy mode - migrate to KRaft in production)
+  zookeeper:
+    enabled: true
+    replicas: 3
+    storage:
+      size: 10Gi
+
+  # Schema Registry
+  schemaRegistry:
+    enabled: true
+    replicas: 3
+
+  # Kafka Connect
+  connect:
+    enabled: true
+    replicas: 3
+
+    # Custom connectors for Metron
+    connectors:
+      - name: syslog-source
+        class: com.github.jcustenborder.kafka.connect.syslog.UDPSyslogSourceConnector
+      - name: snmp-source
+        class: com.github.jcustenborder.kafka.connect.snmp.SnmpTrapSourceConnector
+
+#############################################################################
+# FLINK CONFIGURATION (Stream Processing)
+#############################################################################
+flink:
+  enabled: true
+  version: "1.18.0"
+
+  # Flink Job Manager
+  jobmanager:
+    replicas: 1
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 1000m
+      limits:
+        memory: 4Gi
+        cpu: 2000m
+
+  # Flink Task Manager
+  taskmanager:
+    replicas: 3
+    resources:
+      requests:
+        memory: 4Gi
+        cpu: 2000m
+      limits:
+        memory: 8Gi
+        cpu: 4000m
+    taskSlots: 4
+
+  # High Availability
+  highAvailability:
+    enabled: true
+    storageDir: "s3://metron-flink-ha"
+
+  # Checkpointing
+  checkpointing:
+    enabled: true
+    interval: 60000  # 1 minute
+    storageDir: "s3://metron-flink-checkpoints"
+
+  # State Backend (RocksDB)
+  stateBackend:
+    type: rocksdb
+    incrementalCheckpoints: true
+
+  # Flink Jobs
+  jobs:
+    # Parsing Job
+    - name: metron-parsing
+      jarUri: "local:///opt/flink/usrlib/metron-flink-parsing.jar"
+      parallelism: 4
+      entryClass: org.apache.metron.flink.parsing.ParsingJob
+
+    # Enrichment Job
+    - name: metron-enrichment
+      jarUri: "local:///opt/flink/usrlib/metron-flink-enrichment.jar"
+      parallelism: 4
+      entryClass: org.apache.metron.flink.enrichment.EnrichmentJob
+
+    # Indexing Job
+    - name: metron-indexing
+      jarUri: "local:///opt/flink/usrlib/metron-flink-indexing.jar"
+      parallelism: 4
+      entryClass: org.apache.metron.flink.indexing.IndexingJob
+
+    # Profiler Job
+    - name: metron-profiler
+      jarUri: "local:///opt/flink/usrlib/metron-flink-profiler.jar"
+      parallelism: 2
+      entryClass: org.apache.metron.flink.profiler.ProfilerJob
+
+#############################################################################
+# CASSANDRA CONFIGURATION (NoSQL Storage)
+#############################################################################
+cassandra:
+  enabled: true
+  version: "4.1.0"
+
+  cluster:
+    name: metron-cassandra
+    datacenter: dc1
+    size: 3
+
+    storage:
+      size: 500Gi
+      class: ""
+
+    resources:
+      requests:
+        memory: 8Gi
+        cpu: 2000m
+      limits:
+        memory: 16Gi
+        cpu: 4000m
+
+    config:
+      jvm-options:
+        max_heap_size: "8G"
+        initial_heap_size: "8G"
+
+  # Stargate API (REST/GraphQL for Cassandra)
+  stargate:
+    enabled: true
+    replicas: 2
+
+#############################################################################
+# ELASTICSEARCH CONFIGURATION (Search & Analytics)
+#############################################################################
+elasticsearch:
+  enabled: true
+  version: "8.11.0"
+
+  cluster:
+    name: metron-elasticsearch
+
+    # Master nodes
+    master:
+      replicas: 3
+      storage:
+        size: 50Gi
+      resources:
+        requests:
+          memory: 2Gi
+          cpu: 1000m
+        limits:
+          memory: 4Gi
+          cpu: 2000m
+
+    # Data nodes
+    data:
+      replicas: 3
+      storage:
+        size: 1Ti
+      resources:
+        requests:
+          memory: 8Gi
+          cpu: 2000m
+        limits:
+          memory: 16Gi
+          cpu: 4000m
+
+    # Ingest nodes
+    ingest:
+      replicas: 2
+      resources:
+        requests:
+          memory: 4Gi
+          cpu: 1000m
+        limits:
+          memory: 8Gi
+          cpu: 2000m
+
+    # ML nodes (for ELSER)
+    ml:
+      replicas: 2
+      resources:
+        requests:
+          memory: 8Gi
+          cpu: 2000m
+        limits:
+          memory: 16Gi
+          cpu: 4000m
+
+  # Security
+  security:
+    enabled: true
+    tls:
+      enabled: true
+
+  # Elasticsearch configuration
+  config:
+    xpack.security.enabled: true
+    xpack.ml.enabled: true
+
+#############################################################################
+# KIBANA CONFIGURATION (Visualization)
+#############################################################################
+kibana:
+  enabled: true
+  version: "8.11.0"
+
+  replicas: 2
+
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 1000m
+    limits:
+      memory: 4Gi
+      cpu: 2000m
+
+  config:
+    server.basePath: "/kibana"
+    xpack.security.enabled: true
+    xpack.ml.enabled: true
+
+#############################################################################
+# NEO4J CONFIGURATION (Graph Database for Threat Intel)
+#############################################################################
+neo4j:
+  enabled: true
+  version: "5.15.0"
+
+  core:
+    replicas: 3
+
+    storage:
+      size: 100Gi
+
+    resources:
+      requests:
+        memory: 4Gi
+        cpu: 1000m
+      limits:
+        memory: 8Gi
+        cpu: 2000m
+
+  # Neo4j Bloom (Graph Visualization)
+  bloom:
+    enabled: true
+
+#############################################################################
+# APACHE SUPERSET CONFIGURATION (BI Dashboards)
+#############################################################################
+superset:
+  enabled: true
+  version: "3.0.0"
+
+  replicas: 2
+
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 1000m
+    limits:
+      memory: 4Gi
+      cpu: 2000m
+
+  # PostgreSQL backend
+  postgresql:
+    enabled: true
+
+  # Redis for caching
+  redis:
+    enabled: true
+
+  # Initial dashboards
+  initDashboards:
+    enabled: true
+    dashboards:
+      - threat-overview
+      - network-traffic
+      - alert-analysis
+
+#############################################################################
+# STREAMLIT CONFIGURATION (AI Apps)
+#############################################################################
+streamlit:
+  enabled: true
+
+  apps:
+    # Threat Hunting Assistant
+    - name: threat-hunting
+      image: metron/streamlit-threat-hunting:2.0.0
+      replicas: 2
+
+    # Alert Triage Dashboard
+    - name: alert-triage
+      image: metron/streamlit-alert-triage:2.0.0
+      replicas: 2
+
+    # PCAP Analyzer
+    - name: pcap-analyzer
+      image: metron/streamlit-pcap:2.0.0
+      replicas: 1
+
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: 1000m
+
+#############################################################################
+# AIRFLOW CONFIGURATION (Workflow Orchestration)
+#############################################################################
+airflow:
+  enabled: true
+  version: "2.7.0"
+
+  # Airflow Executor (Kubernetes Executor)
+  executor: KubernetesExecutor
+
+  # Webserver
+  webserver:
+    replicas: 2
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 1000m
+      limits:
+        memory: 4Gi
+        cpu: 2000m
+
+  # Scheduler
+  scheduler:
+    replicas: 2
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 1000m
+      limits:
+        memory: 4Gi
+        cpu: 2000m
+
+  # PostgreSQL backend
+  postgresql:
+    enabled: true
+
+  # DAGs
+  dags:
+    gitSync:
+      enabled: true
+      repo: https://github.com/apache/metron
+      branch: modernization
+      subPath: metron-orchestration/airflow/dags
+
+#############################################################################
+# KUBEFLOW CONFIGURATION (ML Orchestration)
+#############################################################################
+kubeflow:
+  enabled: true
+  version: "1.8.0"
+
+  # Kubeflow Pipelines
+  pipelines:
+    enabled: true
+
+  # Katib (Hyperparameter Tuning)
+  katib:
+    enabled: true
+
+  # Jupyter Notebooks
+  notebooks:
+    enabled: true
+
+  # KFServing (Model Serving)
+  kfserving:
+    enabled: true
+
+#############################################################################
+# OPENCTI CONFIGURATION (Threat Intelligence)
+#############################################################################
+opencti:
+  enabled: true
+  version: "5.12.0"
+
+  replicas: 2
+
+  resources:
+    requests:
+      memory: 4Gi
+      cpu: 1000m
+    limits:
+      memory: 8Gi
+      cpu: 2000m
+
+  # Backend storage (ElasticSearch)
+  elasticsearch:
+    useExternal: true
+
+  # Redis for caching
+  redis:
+    enabled: true
+
+  # Connectors
+  connectors:
+    - misp
+    - alienvault
+    - abuse-ch
+    - opencti-feeds
+
+#############################################################################
+# MONITORING & OBSERVABILITY
+#############################################################################
+monitoring:
+  enabled: true
+
+  # Prometheus
+  prometheus:
+    enabled: true
+    retention: 30d
+    storage:
+      size: 100Gi
+
+  # Grafana
+  grafana:
+    enabled: true
+    adminPassword: changeme
+
+    # Pre-configured dashboards
+    dashboards:
+      - flink-metrics
+      - kafka-metrics
+      - cassandra-metrics
+      - elasticsearch-metrics
+      - system-overview
+
+  # Alertmanager
+  alertmanager:
+    enabled: true
+
+  # Jaeger (Distributed Tracing)
+  jaeger:
+    enabled: true
+
+#############################################################################
+# LOGGING
+#############################################################################
+logging:
+  enabled: true
+
+  # Fluentd for log aggregation
+  fluentd:
+    enabled: true
+
+  # Send logs to Elasticsearch
+  elasticsearch:
+    useExternal: true
+
+#############################################################################
+# INGRESS CONFIGURATION
+#############################################################################
+ingress:
+  enabled: true
+  className: nginx
+
+  tls:
+    enabled: true
+    secretName: metron-tls
+
+  hosts:
+    - host: metron.example.com
+      paths:
+        - path: /
+          service: superset
+        - path: /kibana
+          service: kibana
+        - path: /airflow
+          service: airflow
+        - path: /opencti
+          service: opencti
+        - path: /grafana
+          service: grafana
+
+#############################################################################
+# SECURITY & RBAC
+#############################################################################
+security:
+  # Pod Security Standards
+  podSecurityStandards:
+    enforce: restricted
+
+  # Network Policies
+  networkPolicies:
+    enabled: true
+
+  # Service Mesh (Istio)
+  serviceMesh:
+    enabled: false
+
+  # Secrets Management (Vault)
+  vault:
+    enabled: false
+
+#############################################################################
+# AUTOSCALING
+#############################################################################
+autoscaling:
+  # Horizontal Pod Autoscaler
+  hpa:
+    enabled: true
+
+  # Vertical Pod Autoscaler
+  vpa:
+    enabled: false
+
+  # Cluster Autoscaler
+  clusterAutoscaler:
+    enabled: true
+
+#############################################################################
+# PERSISTENCE
+#############################################################################
+persistence:
+  # Default storage class
+  storageClass: ""
+
+  # Backup configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention: 30  # days
+
+    # Velero for Kubernetes backups
+    velero:
+      enabled: true
+
+#############################################################################
+# METRON REST API
+#############################################################################
+metronRest:
+  enabled: true
+
+  replicas: 3
+
+  image:
+    repository: metron/metron-rest
+    tag: 2.0.0
+
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 1000m
+    limits:
+      memory: 4Gi
+      cpu: 2000m
+
+  # Spring Boot configuration
+  config:
+    spring.profiles.active: kubernetes
+
+  # External dependencies
+  kafka:
+    bootstrapServers: metron-kafka-bootstrap:9092
+  elasticsearch:
+    url: https://metron-elasticsearch:9200
+  cassandra:
+    contactPoints: metron-cassandra
+    keyspace: metron
+
+#############################################################################
+# METRON UI
+#############################################################################
+metronUI:
+  enabled: true
+
+  # Alerts UI
+  alertsUI:
+    replicas: 2
+    image:
+      repository: metron/metron-alerts-ui
+      tag: 2.0.0
+
+  # Config UI
+  configUI:
+    replicas: 2
+    image:
+      repository: metron/metron-config-ui
+      tag: 2.0.0
+
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+
+#############################################################################
+# SENSORS & DATA SOURCES
+#############################################################################
+sensors:
+  # Zeek (Network Analysis)
+  zeek:
+    enabled: true
+    replicas: 2
+
+  # Suricata (IDS/IPS)
+  suricata:
+    enabled: true
+    replicas: 2
+
+  # PCAP Capture
+  pcap:
+    enabled: true
+    storage:
+      size: 1Ti

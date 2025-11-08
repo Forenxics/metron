@@ -19,6 +19,33 @@ limitations under the License.
 
 # Apache Metron
 
+> **⚠️ MODERNIZATION IN PROGRESS (2025)**
+>
+> Apache Metron was archived in April 2021. This repository contains a **comprehensive modernization effort** to revive and enhance Metron with:
+> - **Modern Technologies**: Flink (replacing Storm), Kafka 3.x, Elasticsearch 8.x, Cassandra (replacing HBase)
+> - **AI/ML Integration**: TensorFlow, PyTorch, advanced anomaly detection
+> - **Cloud-Native**: Kubernetes deployment, Helm charts, auto-scaling
+> - **Enhanced UX**: Modern dashboards (Superset, Kibana 8.x), natural language interfaces
+>
+> **📚 Documentation:**
+> - [Modernization Guide](MODERNIZATION_GUIDE.md) - Comprehensive upgrade strategy
+> - [Migration Guide](MIGRATION_GUIDE.md) - Step-by-step migration instructions
+> - [Kubernetes Deployment](metron-deployment/kubernetes/README.md) - Cloud-native deployment
+> - [Flink Integration](metron-platform/metron-flink/README.md) - Modern stream processing
+>
+> **🚀 Quick Start (Modern Metron):**
+> ```bash
+> # Deploy to Kubernetes
+> helm install metron ./metron-deployment/kubernetes/helm/metron-platform \
+>   --namespace metron --create-namespace
+> ```
+>
+> **Legacy Metron (0.7.2) continues below for historical reference.**
+
+---
+
+## About Metron
+
 Metron integrates a variety of open source big data technologies in order
 to offer a centralized tool for security monitoring and analysis. Metron
 provides capabilities for log aggregation, full packet capture indexing,

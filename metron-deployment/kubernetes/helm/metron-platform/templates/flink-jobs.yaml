@@ -1,0 +1,74 @@
+{{- if .Values.flink.enabled }}
+{{- range .Values.flink.jobs }}
+---
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.namespace.name }}
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    app.kubernetes.io/component: flink-job
+    app.kubernetes.io/part-of: metron
+spec:
+  image: apache/flink:{{ $.Values.flink.version }}-java17
+  flinkVersion: v1_18
+  imagePullPolicy: IfNotPresent
+
+  serviceAccount: flink
+
+  jobManager:
+    replicas: {{ $.Values.flink.jobmanager.replicas }}
+    resource:
+      memory: {{ $.Values.flink.jobmanager.resources.limits.memory | quote }}
+      cpu: {{ $.Values.flink.jobmanager.resources.limits.cpu }}
+
+  taskManager:
+    replicas: {{ $.Values.flink.taskmanager.replicas }}
+    resource:
+      memory: {{ $.Values.flink.taskmanager.resources.limits.memory | quote }}
+      cpu: {{ $.Values.flink.taskmanager.resources.limits.cpu }}
+
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: {{ $.Values.flink.taskmanager.taskSlots | quote }}
+    state.backend: {{ $.Values.flink.stateBackend.type }}
+    state.backend.incremental: {{ $.Values.flink.stateBackend.incrementalCheckpoints | quote }}
+    {{- if $.Values.flink.checkpointing.enabled }}
+    execution.checkpointing.interval: {{ $.Values.flink.checkpointing.interval | quote }}
+    state.checkpoints.dir: {{ $.Values.flink.checkpointing.storageDir }}
+    {{- end }}
+    {{- if $.Values.flink.highAvailability.enabled }}
+    high-availability: org.apache.flink.kubernetes.highavailability.KubernetesHaServicesFactory
+    high-availability.storageDir: {{ $.Values.flink.highAvailability.storageDir }}
+    {{- end }}
+
+  job:
+    jarURI: {{ .jarUri }}
+    entryClass: {{ .entryClass }}
+    parallelism: {{ .parallelism }}
+    upgradeMode: stateless
+    state: running
+
+    {{- if $.Values.flink.checkpointing.enabled }}
+    savepointTriggerNonce: 0
+    {{- end }}
+
+  podTemplate:
+    spec:
+      containers:
+        - name: flink-main-container
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "{{ $.Values.kafka.cluster.name }}-kafka-bootstrap:9092"
+            - name: ELASTICSEARCH_HOSTS
+              value: "https://{{ $.Values.elasticsearch.cluster.name }}-es-http:9200"
+            - name: CASSANDRA_CONTACT_POINTS
+              value: "{{ $.Values.cassandra.cluster.name }}-dc1-service"
+          volumeMounts:
+            - name: flink-logs
+              mountPath: /opt/flink/log
+      volumes:
+        - name: flink-logs
+          emptyDir: {}
+{{- end }}
+{{- end }}
